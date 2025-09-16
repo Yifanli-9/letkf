@@ -12,13 +12,19 @@ import xarray as xr
 
 from .assimilation import run_letkf_assimilation
 from .io import load_ensemble, load_observations, save_outputs
+from .mpi import get_world_comm
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _configure_logging(verbose: bool) -> None:
+def _configure_logging(verbose: bool, *, comm) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if comm is not None and comm.Get_size() > 1:
+        rank = comm.Get_rank()
+        fmt = f"%(asctime)s %(levelname)s [rank {rank}] %(name)s: %(message)s"
+    else:
+        fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    logging.basicConfig(level=level, format=fmt)
 
 
 def _load_obs_error(
@@ -71,6 +77,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--time-dim", default="year", help="Name of the temporal dimension")
     parser.add_argument("--member-dim", default="member", help="Name of the ensemble member dimension")
     parser.add_argument("--inflation", type=float, default=1.0, help="Background covariance inflation parameter")
+    parser.add_argument(
+        "--localization-radius",
+        type=float,
+        default=None,
+        help="Gaspari--Cohn localisation radius in the units of the spatial coordinates",
+    )
     parser.add_argument("--output-dir", required=True, help="Directory where NetCDF outputs will be written")
     parser.add_argument(
         "--metadata",
@@ -79,8 +91,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
+    comm = get_world_comm()
     args = parser.parse_args(argv)
-    _configure_logging(args.verbose)
+    _configure_logging(args.verbose, comm=comm)
+
+    rank = comm.Get_rank() if comm is not None else 0
+    size = comm.Get_size() if comm is not None else 1
+
+    if rank == 0 and size > 1:
+        LOGGER.info("MPI world size: %d", size)
 
     obs_var_name = args.obs_var or args.var
 
@@ -108,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         time_dim=args.time_dim,
         obs_error_var=obs_error_var,
         inflation=args.inflation,
+        localization_radius=args.localization_radius,
+        comm=comm,
     )
 
     time_dim = args.time_dim
@@ -141,8 +162,13 @@ def main(argv: list[str] | None = None) -> int:
         for data in outputs.values():
             data.attrs.update(metadata)
 
-    save_outputs(outputs, args.output_dir)
-    LOGGER.info("Analysis inflation parameter: %.3f", result.inflation)
+    if comm is not None:
+        comm.Barrier()
+    if rank == 0:
+        save_outputs(outputs, args.output_dir)
+        LOGGER.info("Analysis inflation parameter: %.3f", result.inflation)
+    if comm is not None:
+        comm.Barrier()
     return 0
 
 

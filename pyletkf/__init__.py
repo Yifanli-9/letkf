@@ -2,10 +2,14 @@
 
 from .assimilation import run_letkf_assimilation
 from .io import load_ensemble, load_observations, save_outputs
+from .localization import gaspari_cohn
+from .mpi import get_world_comm
 
 __all__ = [
     "load_ensemble",
     "load_observations",
     "run_letkf_assimilation",
     "save_outputs",
+    "gaspari_cohn",
+    "get_world_comm",
 ]
