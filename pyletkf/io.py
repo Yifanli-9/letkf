@@ -62,8 +62,11 @@ def load_ensemble(
             if reindexer:
                 data = data.reindex(reindexer)
 
+        # ``expand_dims`` with a coordinate mapping already labels the new
+        # dimension using the provided values, so there is no need to add a
+        # scalar coordinate afterwards (which can clash with existing scalar
+        # coordinates named ``member_dim``).
         data = data.expand_dims({member_dim: [idx]})
-        data = data.assign_coords({member_dim: idx})
         members.append(data)
 
     ensemble = xr.concat(members, dim=member_dim)
