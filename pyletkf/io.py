@@ -47,7 +47,7 @@ def load_ensemble(
     members: list[xr.DataArray] = []
     for idx, path in enumerate(files):
         LOGGER.info("Loading ensemble member from %s", path)
-        with xr.open_dataset(path) as ds:
+        with xr.open_dataset(path, use_cftime=True) as ds:
             if var_name not in ds:
                 raise KeyError(f"Variable {var_name!r} not found in {path!s}")
             data = ds[var_name].load()
@@ -69,7 +69,13 @@ def load_ensemble(
         data = data.expand_dims({member_dim: [idx]})
         members.append(data)
 
-    ensemble = xr.concat(members, dim=member_dim)
+    # ``join='override'`` skips expensive index alignment steps and, crucially,
+    # avoids calendar comparisons between CFTimeIndex and pandas-based
+    # timestamps which can otherwise raise ``TypeError`` when individual model
+    # files use different calendar conventions.  We rely on the LETKF pipeline
+    # operating on ensembles that already share identical grids, so adopting the
+    # coordinates from the first member is safe.
+    ensemble = xr.concat(members, dim=member_dim, join="override")
     ensemble.attrs["source_files"] = [str(path) for path in files]
     return ensemble
 
